@@ -52,6 +52,7 @@ from src.utils.model_router import ModelRouter, ModelConfig  # noqa: E402
 # ---------------------------------------------------------------------------
 CONNECTOR_SCRIPTS = {
     "postgres": _PROJECT_ROOT / "src" / "deep_agents" / "connector_scripts" / "postgres_connector.py",
+    "snowflake": _PROJECT_ROOT / "src" / "deep_agents" / "connector_scripts" / "snowflake_connector.py",
 }
 
 BATCH_SIZE = 25  # tables per deep-agent invocation
