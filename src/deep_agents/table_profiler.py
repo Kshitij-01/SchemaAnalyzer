@@ -107,6 +107,27 @@ def _run_connector(
     return json.loads(result.stdout)
 
 
+def _normalize_stats_dict(stats: dict | list | None, key_name: str = "column") -> list[dict]:
+    """Convert a {col_name: {stats}} dict to [{column: col_name, ...stats}] list.
+
+    The connector returns stats as dicts keyed by column name, but the
+    MD formatter expects a list of dicts with the column name inside.
+    """
+    if stats is None:
+        return []
+    if isinstance(stats, list):
+        return stats  # already a list
+    if isinstance(stats, dict):
+        result = []
+        for col_name, col_stats in stats.items():
+            if isinstance(col_stats, dict):
+                entry = {key_name: col_name}
+                entry.update(col_stats)
+                result.append(entry)
+        return result
+    return []
+
+
 def _format_table_md(
     profile: dict[str, Any],
     source_name: str,
@@ -300,6 +321,200 @@ def _format_table_md(
     lines.append("---")
     lines.append("")
 
+    # ---- Column Statistics (deep profiling) ----
+    # Normalize dict→list format from connector
+    numeric_stats = _normalize_stats_dict(profile.get("numeric_stats"))
+    text_stats_list = _normalize_stats_dict(profile.get("text_stats"))
+    date_stats_list = _normalize_stats_dict(profile.get("date_stats"))
+    boolean_stats_list = _normalize_stats_dict(profile.get("boolean_stats"))
+
+    # Numeric columns
+    if numeric_stats:
+        lines.append("## Column Statistics")
+        lines.append("")
+        lines.append("### Numeric Columns")
+        lines.append("")
+        lines.append("| Column | Min | Max | Mean | Median | StdDev | P25 | P75 | Zeros | Zero% | Distinct | Cardinality |")
+        lines.append("|--------|-----|-----|------|--------|--------|-----|-----|-------|-------|----------|-------------|")
+        for ns in numeric_stats:
+            col_name = ns.get("column", "")
+            _fmt = lambda v: f"{v:.2f}" if isinstance(v, float) else str(v) if v is not None else "--"
+            _pct = lambda v: f"{v:.2f}%" if isinstance(v, (int, float)) and v is not None else "--"
+            lines.append(
+                f"| {col_name} "
+                f"| {_fmt(ns.get('min'))} "
+                f"| {_fmt(ns.get('max'))} "
+                f"| {_fmt(ns.get('mean'))} "
+                f"| {_fmt(ns.get('median'))} "
+                f"| {_fmt(ns.get('stddev'))} "
+                f"| {_fmt(ns.get('p25'))} "
+                f"| {_fmt(ns.get('p75'))} "
+                f"| {ns.get('zeros', '--')} "
+                f"| {_pct(ns.get('zero_pct'))} "
+                f"| {ns.get('distinct', '--')} "
+                f"| {_fmt(ns.get('cardinality'))} |"
+            )
+        lines.append("")
+
+    # Text columns
+    text_stats = text_stats_list
+    if text_stats:
+        # If numeric_stats didn't already open the section header, open it now
+        if not numeric_stats:
+            lines.append("## Column Statistics")
+            lines.append("")
+        lines.append("### Text Columns")
+        lines.append("")
+        lines.append("| Column | Min Len | Max Len | Avg Len | Distinct | Cardinality | Empty | Empty% |")
+        lines.append("|--------|---------|---------|---------|----------|-------------|-------|--------|")
+        for ts in text_stats:
+            col_name = ts.get("column", "")
+            _fmt = lambda v: f"{v:.2f}" if isinstance(v, float) else str(v) if v is not None else "--"
+            _pct = lambda v: f"{v:.2f}%" if isinstance(v, (int, float)) and v is not None else "--"
+            lines.append(
+                f"| {col_name} "
+                f"| {ts.get('min_len', '--')} "
+                f"| {ts.get('max_len', '--')} "
+                f"| {_fmt(ts.get('avg_len'))} "
+                f"| {ts.get('distinct', '--')} "
+                f"| {_fmt(ts.get('cardinality'))} "
+                f"| {ts.get('empty', '--')} "
+                f"| {_pct(ts.get('empty_pct'))} |"
+            )
+        lines.append("")
+
+    # Date/Timestamp columns
+    date_stats = date_stats_list
+    if date_stats:
+        if not numeric_stats and not text_stats:
+            lines.append("## Column Statistics")
+            lines.append("")
+        lines.append("### Date/Timestamp Columns")
+        lines.append("")
+        lines.append("| Column | Earliest | Latest | Range (days) |")
+        lines.append("|--------|----------|--------|-------------|")
+        for ds in date_stats:
+            col_name = ds.get("column", "")
+            lines.append(
+                f"| {col_name} "
+                f"| {ds.get('earliest', '--')} "
+                f"| {ds.get('latest', '--')} "
+                f"| {ds.get('range_days', '--')} |"
+            )
+        lines.append("")
+
+    # Boolean columns
+    boolean_stats = boolean_stats_list
+    if boolean_stats:
+        if not numeric_stats and not text_stats and not date_stats:
+            lines.append("## Column Statistics")
+            lines.append("")
+        lines.append("### Boolean Columns")
+        lines.append("")
+        lines.append("| Column | True | True% | False | False% | Null | Null% |")
+        lines.append("|--------|------|-------|-------|--------|------|-------|")
+        for bs in boolean_stats:
+            col_name = bs.get("column", "")
+            _pct = lambda v: f"{v:.2f}%" if isinstance(v, (int, float)) and v is not None else "--"
+            lines.append(
+                f"| {col_name} "
+                f"| {bs.get('true_count', '--')} "
+                f"| {_pct(bs.get('true_pct'))} "
+                f"| {bs.get('false_count', '--')} "
+                f"| {_pct(bs.get('false_pct'))} "
+                f"| {bs.get('null_count', '--')} "
+                f"| {_pct(bs.get('null_pct'))} |"
+            )
+        lines.append("")
+
+    # Add separator if any column stats section was rendered
+    if numeric_stats or text_stats or date_stats or boolean_stats:
+        lines.append("---")
+        lines.append("")
+
+    # ---- Top Values (per text column) ----
+    text_top_values = profile.get("text_top_values")
+    if text_top_values:
+        lines.append("## Top Values")
+        lines.append("")
+        for col_name, values in text_top_values.items():
+            lines.append(f"### {col_name}")
+            lines.append("")
+            lines.append("| # | Value | Count | % |")
+            lines.append("|---|-------|-------|---|")
+            for i, entry in enumerate(values[:10], start=1):
+                val = str(entry.get("value", ""))
+                if len(val) > 50:
+                    val = val[:47] + "..."
+                val = val.replace("|", "\\|")
+                count = entry.get("count", "--")
+                pct = entry.get("pct")
+                pct_str = f"{pct:.2f}%" if isinstance(pct, (int, float)) and pct is not None else "--"
+                lines.append(f"| {i} | {val} | {count} | {pct_str} |")
+            lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ---- Pattern Detection ----
+    raw_patterns = profile.get("text_patterns")
+    text_patterns = _normalize_stats_dict(raw_patterns) if raw_patterns else []
+    if text_patterns:
+        # Filter to columns with at least one pattern > 0%
+        pattern_keys = ["email", "url", "phone", "uuid", "ipv4"]
+        # Also check _pct suffixed keys from connector
+        pattern_keys_pct = [f"{k}_pct" for k in pattern_keys]
+        filtered = []
+        for tp in text_patterns:
+            all_keys = pattern_keys + pattern_keys_pct
+            has_nonzero = any(
+                isinstance(tp.get(pk), (int, float)) and tp.get(pk, 0) > 0
+                for pk in all_keys
+            )
+            if has_nonzero:
+                filtered.append(tp)
+        if filtered:
+            lines.append("## Pattern Detection")
+            lines.append("")
+            lines.append("| Column | Email | URL | Phone | UUID | IPv4 |")
+            lines.append("|--------|-------|-----|-------|------|------|")
+            for tp in filtered:
+                col_name = tp.get("column", "")
+                def _get_pct(d, key):
+                    """Get pattern percentage, checking both 'email' and 'email_pct' keys."""
+                    v = d.get(key) or d.get(f"{key}_pct")
+                    return f"{v:.2f}%" if isinstance(v, (int, float)) and v is not None else "0.0%"
+                lines.append(
+                    f"| {col_name} "
+                    f"| {_get_pct(tp, 'email')} "
+                    f"| {_get_pct(tp, 'url')} "
+                    f"| {_get_pct(tp, 'phone')} "
+                    f"| {_get_pct(tp, 'uuid')} "
+                    f"| {_get_pct(tp, 'ipv4')} |"
+                )
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+    # ---- Adaptive Insights ----
+    adaptive_insights = profile.get("adaptive_insights")
+    if adaptive_insights:
+        lines.append("## Adaptive Insights")
+        lines.append("")
+        lines.append("| # | Column | Insight | Details | Severity |")
+        lines.append("|---|--------|---------|---------|----------|")
+        for i, ai in enumerate(adaptive_insights, start=1):
+            col_name = ai.get("column", "--")
+            insight = ai.get("insight", "--")
+            details = str(ai.get("details", "--"))
+            if len(details) > 50:
+                details = details[:47] + "..."
+            details = details.replace("|", "\\|")
+            severity = ai.get("severity", "INFO")
+            lines.append(f"| {i} | {col_name} | {insight} | {details} | {severity} |")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
     # ---- Sample Data ----
     sample = profile.get("sample_data", [])
     lines.append("## Sample Data (5 Rows)")
@@ -352,6 +567,7 @@ def profile_tables_direct(
     output_dir: str,
     source_name: str | None = None,
     model_name: str = "direct-profiler",
+    run_logger: Any | None = None,
 ) -> dict[str, Any]:
     """Profile tables by calling the connector directly (no LLM).
 
@@ -403,6 +619,12 @@ def profile_tables_direct(
             file_path.write_text(md_content, encoding="utf-8")
             print(f"[table_profiler] Wrote {file_path.name}", file=sys.stderr)
             successes += 1
+            if run_logger:
+                run_logger.log_agent_action(
+                    "Table Profiler",
+                    f"Profiled {table_name}",
+                    f"rows={profile.get('row_count', 'N/A')}, columns={len(profile.get('columns', []))}",
+                )
         except Exception as exc:
             print(f"[table_profiler] FAILED to write {table_name}: {exc}", file=sys.stderr)
             failures += 1
