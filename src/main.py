@@ -222,6 +222,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate summaries and master schema only (skip profiling, use existing MDs)",
     )
     parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Generate HTML reports for all profiled sources after analysis",
+    )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Generate HTML reports only (skip profiling, use existing table MDs)",
+    )
+    parser.add_argument(
         "--env-info",
         default=str(_PROJECT_ROOT / "env_info_clean.json"),
         help="Path to env_info_clean.json",
@@ -272,9 +282,49 @@ def run_analyze(output_dir: str = "output") -> None:
     print(json.dumps(results, indent=2))
 
 
+def run_report(output_dir: str = "output") -> None:
+    """Generate HTML reports for all profiled sources."""
+    from src.utils.report_generator import generate_html_report
+
+    output_path = Path(output_dir)
+    sources_dir = output_path / "sources"
+
+    if not sources_dir.exists():
+        print("[SchemaAnalyzer] No sources directory found. Run profiling first.")
+        return
+
+    generated = 0
+    for source_dir in sorted(sources_dir.iterdir()):
+        if not source_dir.is_dir():
+            continue
+        tables_dir = source_dir / "tables"
+        if not tables_dir.exists() or not list(tables_dir.glob("*.md")):
+            continue
+        source_name = source_dir.name
+        report_path = source_dir / "report.html"
+        print(f"[report] Generating HTML report for {source_name}...", flush=True)
+        generate_html_report(
+            source_dir=str(source_dir),
+            source_name=source_name,
+            output_path=str(report_path),
+        )
+        print(f"[report]   -> {report_path}")
+        generated += 1
+
+    if generated:
+        print(f"[report] Generated {generated} HTML report(s).")
+    else:
+        print("[report] No sources with table profiles found.")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # ---- Report only ----
+    if args.report_only:
+        run_report()
+        return
 
     # ---- Summarize only ----
     if args.summarize_only:
@@ -321,6 +371,10 @@ def main() -> None:
         # Optional: run analysis
         if args.analyze:
             run_analyze()
+
+        # Optional: generate HTML reports
+        if args.report:
+            run_report()
 
         return
 
