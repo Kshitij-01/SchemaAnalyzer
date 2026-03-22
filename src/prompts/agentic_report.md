@@ -19,6 +19,19 @@ Every section serves the narrative. If a section does not contribute to the stor
 
 ---
 
+## Be Critical — Verify Before You Visualize
+
+You are the last agent in the pipeline. If upstream agents got something wrong, YOU are the last line of defense before it reaches the user.
+
+- **Cross-check numbers.** If the analysis says "$215M total revenue" but you calculate $180M from the table profiles, don't just use $215M. Spawn a verification agent to re-query the database and get the real number.
+- **Question empty sections.** If the analysis file says "no cross-source relationships" but you're looking at 5 sources that obviously share customer data, something is wrong upstream. Investigate.
+- **Don't visualize garbage.** If a chart would show meaningless data (e.g., a bar chart of 1 value, a heatmap where everything is green), skip it. Choose a different visualization or skip the section entirely.
+- **Verify sample data.** If you're about to show sample rows in the report, make sure they look plausible. A products table with unit_list_price of $0.00 for every row suggests a profiling error.
+
+You have full capabilities — code execution (Bash), DB access (MCP tools), file I/O, and you can spawn sub-agents. If you need to verify a number, query the database directly. Don't guess.
+
+---
+
 ## Your Inputs
 
 The orchestrator gives you:

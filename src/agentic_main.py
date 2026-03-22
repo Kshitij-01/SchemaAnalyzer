@@ -82,22 +82,28 @@ def _build_agents() -> dict[str, AgentDefinition]:
     analysis_prompt = _load_prompt("agentic_analysis.md")
     report_prompt = _load_prompt("agentic_report.md")
 
+    # Every agent gets the FULL toolset -- no restrictions.
+    # Any agent can spawn sub-agents, execute code, query DBs, read/write files.
+    # The only difference between agents is their system prompt and model.
+    _full_tools = [
+        "Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent",
+        "mcp__database__query_postgres",
+        "mcp__database__list_postgres_schemas",
+        "mcp__database__list_postgres_tables",
+        "mcp__database__profile_postgres_table",
+    ]
+
     return {
         "discovery": AgentDefinition(
             description=(
                 "Connects to data sources, discovers schemas and tables, and "
                 "profiles them.  Can handle any source -- Postgres, Snowflake, "
                 "Delta Lake, Parquet, CSV, MongoDB.  Writes connector code on "
-                "the fly if needed."
+                "the fly if needed.  Can spawn sub-agents for parallel profiling "
+                "or verification."
             ),
             prompt=discovery_prompt,
-            tools=[
-                "Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent",
-                "mcp__database__query_postgres",
-                "mcp__database__list_postgres_schemas",
-                "mcp__database__list_postgres_tables",
-                "mcp__database__profile_postgres_table",
-            ],
+            tools=_full_tools,
             model="sonnet",
         ),
         "analysis": AgentDefinition(
@@ -105,13 +111,11 @@ def _build_agents() -> dict[str, AgentDefinition]:
                 "Deep analysis agent.  Reads all profiles and writes "
                 "intelligent analysis -- relationships, quality issues, "
                 "business insights, schema patterns.  Uses Opus for complex "
-                "reasoning."
+                "reasoning.  Can spawn verification sub-agents to re-query "
+                "databases when something looks off."
             ),
             prompt=analysis_prompt,
-            tools=[
-                "Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent",
-                "mcp__database__query_postgres",
-            ],
+            tools=_full_tools,
             model="opus",
         ),
         "report": AgentDefinition(
@@ -119,43 +123,51 @@ def _build_agents() -> dict[str, AgentDefinition]:
                 "Generates comprehensive HTML reports with Mermaid diagrams, "
                 "Chart.js visualizations, and narrative explanations.  Writes "
                 "reports as a data analyst would -- with context and "
-                "recommendations."
+                "recommendations.  Can spawn sub-agents to verify data or "
+                "generate specific report sections."
             ),
             prompt=report_prompt,
-            tools=[
-                "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-            ],
+            tools=_full_tools,
             model="sonnet",
         ),
         "verification": AgentDefinition(
             description=(
                 "Verification agent for resolving doubts about profiled data. "
-                "Has full DB access.  Spawned by other agents when they need "
-                "to re-query a database to clarify a discrepancy, confirm a "
-                "relationship, or investigate an anomaly.  Returns findings "
-                "in context/agent_comms/."
+                "Has full DB access and code execution.  Spawned by ANY agent "
+                "when they need to re-query a database to clarify a discrepancy. "
+                "Can itself spawn further sub-agents if the investigation requires "
+                "deeper digging."
             ),
             prompt=(
                 "You are a verification agent for SchemaAnalyzer.  Another agent "
-                "has a question about data in a profiled database.  You have full "
-                "access to the database via MCP tools and Bash.  Your job:\n\n"
+                "has a question about data in a profiled database.\n\n"
+                "## Your Capabilities\n"
+                "You have FULL access: database queries (MCP tools), code execution "
+                "(Bash), file operations (Read/Write/Edit), and you can spawn your "
+                "own sub-agents (Agent tool) if you need to parallelize or delegate "
+                "part of your investigation.\n\n"
+                "## Your Job\n"
                 "1. Read the question and context provided\n"
                 "2. Run the SQL queries needed to answer it\n"
-                "3. Write your findings to the specified output file\n"
-                "4. Include raw query results, your interpretation, and a "
+                "3. If the investigation reveals MORE questions, spawn sub-agents "
+                "or run additional queries -- go as deep as needed\n"
+                "4. Write your findings to the specified output file\n"
+                "5. Include raw query results, your interpretation, and a "
                 "definitive answer\n\n"
-                "Format your output as markdown with sections: Question, "
-                "Investigation (queries + results), Answer, Impact.\n\n"
+                "## Be Critical\n"
+                "Do not accept surface-level answers.  If a query result seems "
+                "wrong, run a different query to cross-check.  If column types "
+                "don't match, check pg_catalog directly.  If row counts seem off, "
+                "run COUNT(*) yourself.  Your answer must be DEFINITIVE -- the "
+                "asking agent is blocked until you respond.\n\n"
+                "## Output Format\n"
+                "Write markdown with sections: Question, Investigation "
+                "(queries + results), Answer, Impact, Confidence (high/medium/low "
+                "with reasoning).\n\n"
                 "You are read-only.  Never modify source data.  "
                 "Mask passwords in output with ***."
             ),
-            tools=[
-                "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-                "mcp__database__query_postgres",
-                "mcp__database__list_postgres_schemas",
-                "mcp__database__list_postgres_tables",
-                "mcp__database__profile_postgres_table",
-            ],
+            tools=_full_tools,
             model="sonnet",
         ),
     }
