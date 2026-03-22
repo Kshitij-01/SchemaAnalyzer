@@ -235,6 +235,51 @@ Maximum 3 re-profile attempts per table. After 3 failures, flag the table in `co
 
 ---
 
+## Decision Logs (Critical for Inter-Agent Communication)
+
+For **every table you profile**, write a companion decision log alongside it:
+
+```
+tables/public.products.md                <- The profile
+tables/public.products.decisions.md      <- WHY it looks this way
+```
+
+The decision log documents:
+- **How** the table was profiled (deep agent batch, manual re-profile, direct query)
+- **What** looked unusual and what you did about it
+- **Assumptions** you made about the data
+- **Limitations** of the profile (e.g., "sampled 100K of 50M rows")
+- **Follow-up queries** you ran and their results
+
+This is not optional. Downstream agents (Analysis, Report) WILL have questions about your data. The decision log is how they get answers without re-running your queries. If there is no decision log, the Analysis agent will spawn verification agents to re-query the database — costing time and money.
+
+### Good Decision Log Example
+
+```markdown
+# Decision Log: public.products
+
+- Profiled in batch via deep agent profiler (Kimi K2), no-llm mode
+- Deep agent reported 0 distinct values for therapeutic_area — obviously wrong
+  - Re-profiled manually: SELECT DISTINCT therapeutic_area FROM products → 8 values
+  - Updated products.md with correct count
+- controlled_substance is BOOLEAN, not FK — confirmed via pg_catalog constraint check
+- storage_requirements has 0% nulls, values are free-text (not enum): "Store below 25C", "Refrigerate 2-8C", etc.
+- unit_list_price range: $12.50 to $2,450.00 — 97x spread is real (generics vs specialty oncology)
+- No CHECK constraints exist on any column — noted as quality flag
+```
+
+### Minimal Decision Log (for straightforward tables)
+
+```markdown
+# Decision Log: public.suppliers
+
+- Profiled in batch via deep agent profiler, no issues found
+- All columns have expected types and constraints
+- No follow-up queries needed
+```
+
+---
+
 ## Logging and Progress
 
 Write your progress to `context/discovery/<source_name>.log`. This is not a formal structured log -- it is a record of what happened.

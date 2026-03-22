@@ -127,6 +127,37 @@ def _build_agents() -> dict[str, AgentDefinition]:
             ],
             model="sonnet",
         ),
+        "verification": AgentDefinition(
+            description=(
+                "Verification agent for resolving doubts about profiled data. "
+                "Has full DB access.  Spawned by other agents when they need "
+                "to re-query a database to clarify a discrepancy, confirm a "
+                "relationship, or investigate an anomaly.  Returns findings "
+                "in context/agent_comms/."
+            ),
+            prompt=(
+                "You are a verification agent for SchemaAnalyzer.  Another agent "
+                "has a question about data in a profiled database.  You have full "
+                "access to the database via MCP tools and Bash.  Your job:\n\n"
+                "1. Read the question and context provided\n"
+                "2. Run the SQL queries needed to answer it\n"
+                "3. Write your findings to the specified output file\n"
+                "4. Include raw query results, your interpretation, and a "
+                "definitive answer\n\n"
+                "Format your output as markdown with sections: Question, "
+                "Investigation (queries + results), Answer, Impact.\n\n"
+                "You are read-only.  Never modify source data.  "
+                "Mask passwords in output with ***."
+            ),
+            tools=[
+                "Read", "Write", "Edit", "Bash", "Glob", "Grep",
+                "mcp__database__query_postgres",
+                "mcp__database__list_postgres_schemas",
+                "mcp__database__list_postgres_tables",
+                "mcp__database__profile_postgres_table",
+            ],
+            model="sonnet",
+        ),
     }
 
 

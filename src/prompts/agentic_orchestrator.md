@@ -218,6 +218,121 @@ The user should open the report and say "this is exactly what I needed to unders
 
 ---
 
+## Inter-Agent Communication Protocol
+
+Agents in SchemaAnalyzer are **ephemeral** -- when a sub-agent finishes, its context is destroyed. But agents frequently need to ask questions about data produced by other agents. This is solved by a combination of **context files** and **verification agents**.
+
+### How It Works
+
+Every agent writes a **decision log** alongside its output. This is not optional -- it is part of the agent's job. The decision log explains WHY data looks the way it does, WHAT assumptions were made, and WHAT limitations exist.
+
+```
+sources/jhonson_pharma/tables/public.products.md        <- The data
+sources/jhonson_pharma/tables/public.products.decisions.md  <- WHY it looks this way
+```
+
+When a downstream agent (e.g., Analysis) has a doubt about upstream data (e.g., a table MD created by Discovery), it follows this protocol:
+
+### Step 1: Check the Decision Log
+
+Read `<table>.decisions.md` first. The answer may already be there.
+
+```
+# Decision Log: public.products
+
+- Profiled via deep agent (Kimi K2) in batch mode
+- Re-profiled `therapeutic_area` manually because deep agent reported 0 distinct values (incorrect)
+- Actual distinct values: 8 (Oncology, Immunology, Cardiology, ...)
+- `controlled_substance` is boolean, not FK -- confirmed via pg_catalog
+- Note: `storage_requirements` has 0% nulls but values are free-text, not enum
+```
+
+### Step 2: Spawn a Verification Agent
+
+If the decision log doesn't answer the question, spawn a **verification agent** via the Agent tool. The verification agent has full DB access and can re-query the source to resolve the doubt.
+
+```
+Agent tool call:
+  "I am the Analysis Agent. I found that products.therapeutic_area has
+   8 distinct values but no FK constraint. The Decision Log says it was
+   re-profiled but doesn't explain whether a lookup table exists.
+
+   QUESTION: Is therapeutic_area a foreign key to a missing lookup table,
+   or are these inline enum values?
+
+   CONTEXT:
+   - Source: jhonson_pharma (Postgres at sqltosnowflake.postgres.database.azure.com)
+   - Database: jhonson pharma
+   - Credentials: user=postgresadmin, password=Postgres@123456
+   - Table: public.products
+   - Column: therapeutic_area
+
+   TASK:
+   1. Query: SELECT DISTINCT therapeutic_area FROM products ORDER BY 1
+   2. Check if a therapeutic_areas or therapy_types table exists
+   3. Check pg_catalog for any constraints on this column
+   4. Write your answer to: <run_dir>/context/agent_comms/verification_001.md
+   5. Include the raw query results"
+```
+
+### Step 3: Read the Answer and Continue
+
+The verification agent runs its queries, writes its findings, and returns. The asking agent reads the communication file and continues with certainty.
+
+### Communication Files
+
+All inter-agent communication goes to `context/agent_comms/`:
+
+```
+context/agent_comms/
+    verification_001.md         # Analysis asked about therapeutic_area
+    verification_002.md         # Analysis asked about shipped_date nulls
+    reprofile_request_001.md    # Analysis requested re-profile of orders
+    reprofile_response_001.md   # Discovery re-profiled and responded
+```
+
+Each file follows this format:
+
+```markdown
+# Agent Communication: <title>
+
+**From**: <agent name and role>
+**To**: <target agent or "verification">
+**Timestamp**: <ISO timestamp>
+**Status**: resolved | pending | escalated
+
+## Question
+<the specific question>
+
+## Context
+<relevant background, file references, query results>
+
+## Investigation
+<what the verification agent did -- queries run, results found>
+
+## Answer
+<the definitive answer>
+
+## Impact
+<what changed as a result -- file edits, revised analysis, etc.>
+```
+
+### When to Spawn Verification Agents
+
+Agents should request verification when:
+- A null percentage seems structurally impossible (e.g., NOT NULL column shows >0% nulls)
+- A FK reference points to a table that doesn't exist in the profiles
+- Column types between related tables don't match (INT vs UUID)
+- Statistics seem inconsistent (row count of fact table < row count of dimension table)
+- A column's distinct values suggest a lookup table that isn't profiled
+- Sample data contradicts the inferred data type or constraint
+
+### Escalation
+
+If a verification agent can't resolve the issue (e.g., it requires access to a different system, or the data is genuinely ambiguous), it writes the file with `Status: escalated` and the orchestrator handles it -- either by investigating directly or flagging it for human review in the final report.
+
+---
+
 ## Anti-Patterns to Avoid
 
 - **Do not follow a rigid sequence if it does not make sense.** If one source is Postgres and another is a pile of CSV files, do not force them through the same pipeline.

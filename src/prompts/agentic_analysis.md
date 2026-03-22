@@ -277,6 +277,67 @@ Write quality scores to `context/feedback/quality_scores.md` so the report agent
 
 ---
 
+## Asking Questions About Upstream Data
+
+You will frequently encounter data in table MDs that raises questions. Maybe a null percentage looks wrong. Maybe a FK reference points to a table that doesn't exist. Maybe column types between related tables don't match. **Do not guess. Investigate.**
+
+### Protocol: When You Have a Doubt
+
+1. **Check the decision log first.** Look for `<table>.decisions.md` alongside the table MD. The discovery agent may have already documented why the data looks the way it does.
+
+2. **Spawn a verification agent.** If the decision log doesn't answer your question, use the Agent tool to spawn a sub-agent with:
+   - The specific question you need answered
+   - The database connection details (from the source summary or run config)
+   - The SQL queries you want run
+   - The output path: `context/agent_comms/verification_NNN.md`
+
+   The verification agent has full DB access (Bash + MCP tools) and will run the queries, write its findings, and return.
+
+3. **Read the answer and continue.** The verification file contains the raw query results and a definitive answer.
+
+### Example: Investigating a Null Pattern
+
+```
+You see: sales_orders.shipped_date has 35.9% nulls
+You wonder: Is this a data quality issue or expected behavior?
+
+Step 1: Check public.sales_orders.decisions.md → not found
+Step 2: Spawn verification agent:
+  "Query jhonson pharma postgres:
+   SELECT order_status, COUNT(*),
+          SUM(CASE WHEN shipped_date IS NULL THEN 1 ELSE 0 END) as nulls
+   FROM sales_orders GROUP BY 1
+   Write results to context/agent_comms/verification_001.md"
+Step 3: Read verification_001.md →
+  "Pending Approval: 12 orders (all null), Processing: 8 (all null),
+   Shipped: 103 (0 null). The 35.9% nulls = unshipped orders. Expected."
+```
+
+### Example: Investigating a Missing FK
+
+```
+You see: sales_order_items.product_id references products, but products.md shows no incoming FK
+You wonder: Is the FK actually declared, or was the profiler wrong?
+
+Spawn verification agent:
+  "Query postgres information_schema:
+   SELECT * FROM information_schema.table_constraints
+   WHERE table_name = 'sales_order_items' AND constraint_type = 'FOREIGN KEY'
+   Also: SELECT * FROM information_schema.referential_constraints
+   WHERE constraint_schema = 'public'
+   Write to context/agent_comms/verification_002.md"
+```
+
+### When to Investigate vs. When to Flag
+
+- **Investigate** when the query is simple and the answer will improve your analysis
+- **Flag for human review** when the issue requires business context you can't infer (e.g., "is this table still in use?")
+- **Always investigate** type mismatches between FK columns — these are almost always profiler errors
+
+Write all investigations to `context/agent_comms/` so the report agent can reference them.
+
+---
+
 ## Constraints
 
 - **Do not modify table MDs**: Only discovery agents write table MDs. You read them and request re-profiles if needed.
