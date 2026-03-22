@@ -13,8 +13,8 @@ Usage::
     python src/agentic_main.py "Connect to postgres at host=sqltosnowflake..." \\
         --run-name pharma_deep
 
-The orchestrator (Sonnet) plans and coordinates.  Discovery and report agents
-run on Sonnet.  The analysis agent runs on Opus for complex reasoning.
+The orchestrator (Opus 4.5) plans and coordinates.  Discovery and report agents
+run on Sonnet.  The analysis agent also runs on Opus for complex reasoning.
 Database tools are available as native MCP calls -- no subprocess overhead.
 """
 
@@ -208,14 +208,14 @@ async def run_agentic(user_input: str, run_name: str | None = None) -> None:
             "mcp__database__profile_postgres_table",
         ],
         permission_mode="bypassPermissions",
-        model="claude-sonnet-4-5",
+        model="claude-opus-4-5",
         cwd=str(_PROJECT_ROOT),
     )
 
     # --- Print banner -------------------------------------------------------
     print(f"[SchemaAnalyzer] Starting agentic run: {ctx.run_id}")
     print(f"[SchemaAnalyzer] Run directory: {ctx.run_dir}")
-    print(f"[SchemaAnalyzer] Orchestrator: Claude Sonnet")
+    print(f"[SchemaAnalyzer] Orchestrator: Claude Opus 4.5")
     print(f"[SchemaAnalyzer] Analysis: Claude Opus (for complex reasoning)")
     print(f"[SchemaAnalyzer] Profiling: Kimi K2 via deep agents (for grunt work)")
     print()
