@@ -207,6 +207,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run in direct mode (no Claude Agent SDK, just connector + formatter)",
     )
     parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="Run analysis after profiling (relationships, quality audit, feedback)",
+    )
+    parser.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="Run analysis only (skip profiling, use existing table MDs)",
+    )
+    parser.add_argument(
+        "--summarize-only",
+        action="store_true",
+        help="Generate summaries and master schema only (skip profiling, use existing MDs)",
+    )
+    parser.add_argument(
         "--env-info",
         default=str(_PROJECT_ROOT / "env_info_clean.json"),
         help="Path to env_info_clean.json",
@@ -215,9 +230,61 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def run_summarize(output_dir: str = "output") -> None:
+    """Generate source summaries and master schema from existing table MDs."""
+    from src.utils.summary_generator import generate_source_summary
+    from src.utils.master_generator import generate_master_schema
+
+    output_path = Path(output_dir)
+    sources_dir = output_path / "sources"
+
+    if not sources_dir.exists():
+        print("[SchemaAnalyzer] No sources directory found. Run profiling first.")
+        return
+
+    # Generate _summary.md for each source
+    for source_dir in sorted(sources_dir.iterdir()):
+        if not source_dir.is_dir():
+            continue
+        tables_dir = source_dir / "tables"
+        if not tables_dir.exists() or not list(tables_dir.glob("*.md")):
+            continue
+        source_name = source_dir.name
+        print(f"[summarize] Generating summary for {source_name}...")
+        generate_source_summary(
+            source_dir=str(source_dir),
+            source_name=source_name,
+            source_type="postgres",
+            connection_info={"host": "***", "database": source_name},
+        )
+
+    # Generate master_schema.md
+    print(f"[summarize] Generating master_schema.md...")
+    generate_master_schema(output_dir)
+    print(f"[summarize] Done!")
+
+
+def run_analyze(output_dir: str = "output") -> None:
+    """Run the full analysis pipeline on existing output."""
+    from src.agents.analysis import run_analysis_direct
+    results = run_analysis_direct(output_dir)
+    print(f"\n[SchemaAnalyzer] Analysis Results:")
+    print(json.dumps(results, indent=2))
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # ---- Summarize only ----
+    if args.summarize_only:
+        run_summarize()
+        return
+
+    # ---- Analyze only ----
+    if args.analyze_only:
+        run_analyze()
+        return
 
     # ---- Direct mode (no SDK) ----
     if args.direct or args.from_env:
@@ -247,6 +314,14 @@ def main() -> None:
                 schema=args.schema,
                 source_name=f"{config.source_type.value}_{config.database or 'default'}",
             ))
+
+        # Post-profiling: generate summaries + master schema
+        run_summarize()
+
+        # Optional: run analysis
+        if args.analyze:
+            run_analyze()
+
         return
 
     # ---- SDK mode ----
